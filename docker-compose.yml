@@ -20,6 +20,8 @@ x-airflow-common: &airflow-common
     PYTHONPATH: /opt/airflow/src
     GAZETTE_ROOT: /opt/airflow
     GAZETTE_DATABASE_URL: postgresql://airflow:${POSTGRES_PASSWORD:?Run bin/dev.ps1 first}@postgres/gazette
+    GAZETTE_ALERT_WEBHOOK_URL: ${GAZETTE_ALERT_WEBHOOK_URL:-}
+    GAZETTE_ALERT_PROVIDER: ${GAZETTE_ALERT_PROVIDER:-discord}
   volumes:
     - ./dags:/opt/airflow/dags:ro
     - ./src:/opt/airflow/src:ro
@@ -28,6 +30,7 @@ x-airflow-common: &airflow-common
     - ./logs:/opt/airflow/logs
     - ./data:/opt/airflow/data
     - ./articles_bruts:/opt/airflow/articles_bruts
+    - ./rapports:/opt/airflow/rapports
     - airflow-auth:/opt/airflow/auth
 
 services:
@@ -40,11 +43,14 @@ services:
     environment:
       PYTHONPATH: /app/src
       GAZETTE_DATABASE_URL: postgresql://airflow:${POSTGRES_PASSWORD:?Run bin/dev.ps1 first}@postgres/gazette
+      GAZETTE_ALERT_WEBHOOK_URL: ${GAZETTE_ALERT_WEBHOOK_URL:-}
+      GAZETTE_ALERT_PROVIDER: ${GAZETTE_ALERT_PROVIDER:-discord}
     volumes:
       - ./sources.csv:/app/sources.csv:ro
       - ./data:/app/data
       - ./articles_bruts:/app/articles_bruts
       - ./tests/fixtures:/app/fixtures:ro
+      - ./rapports:/app/rapports
     command: ["--source", "lemonde"]
     profiles: [collect]
 
