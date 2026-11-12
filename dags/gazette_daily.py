@@ -1,46 +1,108 @@
-"""Premier palier : collecte RSS uniquement, sans publication d'edition."""
+"""Gazette : collecte RSS et contrôle qualité toutes les 30 minutes (TD4)."""
 
+import json
 import os
 from datetime import timedelta
 from pathlib import Path
 
 import pendulum
-from airflow.sdk import dag, get_current_context, task
+from airflow.sdk import dag, task
 
 
 @dag(
     dag_id="gazette_daily",
-    description="Collecte des titres RSS recents en JSON",
-    schedule="0 6 * * *",
-    start_date=pendulum.datetime(2026, 10, 19, tz="Europe/Paris"),
+    description="RSS -> stockage brut -> articles propres/rejets -> rapport -> contrôles et alertes",  # noqa: E501
+    schedule="*/30 * * * *",
+    start_date=pendulum.datetime(2026, 10, 21, tz="Europe/Paris"),
     catchup=False,
     max_active_runs=1,
-    dagrun_timeout=timedelta(minutes=45),
-    default_args={
-        "retries": 3,
-        "retry_delay": timedelta(minutes=2),
-        "retry_exponential_backoff": True,
-        "max_retry_delay": timedelta(minutes=5),
-        "execution_timeout": timedelta(minutes=3),
-    },
-    tags=["mdja", "rss"],
+    dagrun_timeout=timedelta(minutes=29),
+    default_args={"retries": 0},
+    tags=["mdja", "rss", "qualite", "td4"],
 )
 def gazette_daily():
-    @task
-    def read_sources():
-        from gazette.collectors.rss import load_sources
+    @task(execution_timeout=timedelta(minutes=19))
+    def collect_rss():
+        from gazette.collectors.rss import collect_active_sources
 
         root = Path(os.environ.get("GAZETTE_ROOT", "/opt/airflow"))
-        return load_sources(root / "sources.csv")
+        results = collect_active_sources(
+            os.environ["GAZETTE_DATABASE_URL"], root / "articles_bruts"
+        )
+        failures = {source: data["error"] for source, data in results.items() if "error" in data}
+        totals = {
+            key: sum(int(data.get(key, 0)) for data in results.values())
+            for key in ("recus", "ecrits", "ignores", "repares")
+        }
+        summary = {
+            "event": "gazette_cycle_summary",
+            "sources_checked": len(results),
+            "sources_failed": len(failures),
+            "totals": totals,
+            "failures": failures,
+        }
+        print(json.dumps(summary, ensure_ascii=False))
+        # Les erreurs individuelles sont gérées par le collecteur et comptées par cycle.
+        # Ne pas les relancer avec Airflow : cela fausserait les échecs consécutifs.
+        return {"sources_checked": len(results), "sources_failed": len(failures), **totals}
 
-    @task
-    def collect_rss(source):
-        from gazette.collectors.rss import collect_source
+    @task(execution_timeout=timedelta(minutes=5))
+    def process_quality():
+        from gazette.processing.persist import rebuild_quality
 
         root = Path(os.environ.get("GAZETTE_ROOT", "/opt/airflow"))
-        return collect_source(source, root / "data" / "raw", get_current_context()["run_id"])
+        result = rebuild_quality(os.environ["GAZETTE_DATABASE_URL"], root / "articles_bruts")
+        print(json.dumps({"event": "gazette_quality_processed", **result}, ensure_ascii=False))
+        return result
 
-    collect_rss.expand(source=read_sources())
+    @task(execution_timeout=timedelta(minutes=2))
+    def generate_quality_report():
+        from contextlib import closing
+
+        import psycopg2
+
+        from gazette.processing.report import collect_quality_snapshot, write_report
+
+        root = Path(os.environ.get("GAZETTE_ROOT", "/opt/airflow"))
+        with closing(
+            psycopg2.connect(os.environ["GAZETTE_DATABASE_URL"], connect_timeout=10)
+        ) as connection:
+            snapshot = collect_quality_snapshot(connection)
+        report_path = write_report(snapshot, root / "rapports")
+        print(
+            json.dumps(
+                {
+                    "event": "gazette_quality_report",
+                    "path": str(report_path),
+                    "totals": snapshot["totaux"],
+                    "top_5_rejets": snapshot["top_5_rejets"],
+                },
+                ensure_ascii=False,
+            )
+        )
+        return str(report_path)
+
+    @task(execution_timeout=timedelta(minutes=2))
+    def check_quality():
+        from gazette.processing.quality_checks import run_checks
+
+        result = run_checks(
+            os.environ["GAZETTE_DATABASE_URL"],
+            webhook_url=os.environ.get("GAZETTE_ALERT_WEBHOOK_URL") or None,
+            provider=os.environ.get("GAZETTE_ALERT_PROVIDER", "discord"),
+        )
+        print(json.dumps({"event": "gazette_quality_check", **result}, ensure_ascii=False))
+        # Un contrôle échoué doit apparaître comme un échec dans Airflow.
+        # L'alerte webhook a déjà été envoyée par run_checks si elle était configurée.
+        if result["alertes"]:
+            raise ValueError(f"Contrôles qualité en échec : {len(result['alertes'])} alerte(s)")
+        return {"statut": result["statut"], "alertes": 0}
+
+    collecte = collect_rss()
+    qualite = process_quality()
+    rapport = generate_quality_report()
+    controle = check_quality()
+    collecte >> qualite >> rapport >> controle
 
 
 gazette_daily()

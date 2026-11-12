@@ -19,6 +19,8 @@ standalone_admin_password.txt
 # Données
 data/*
 !data/.gitkeep
+articles_bruts/*
+!articles_bruts/.gitkeep
 
 # IDE
 .vscode/
@@ -36,3 +38,10 @@ dist/
 
 # Preuves locales et clone de validation
 .validation/
+
+# Archives de documentation
+/docs/Archive/
+# Fichiers générés / de travail
+rapports/*.md
+!rapports/.gitkeep
+sources.csv.xlsx

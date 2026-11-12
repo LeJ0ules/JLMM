@@ -47,13 +47,18 @@ jobs:
           bag = DagBag('/opt/airflow/dags');
           assert not bag.import_errors, bag.import_errors;
           dag = bag.dags['gazette_daily'];
-          assert len(dag.tasks) == 2;
-          assert dag.max_active_runs == 1"
+          assert len(dag.tasks) == 4;
+          assert dag.max_active_runs == 1;
+          assert {t.task_id for t in dag.tasks} == {'collect_rss', 'process_quality', 'generate_quality_report', 'check_quality'};
+          from airflow.serialization.serialized_objects import DagSerialization;
+          DagSerialization.from_dict(DagSerialization.to_dict(dag))"
+      - name: Test PostgreSQL storage and idempotence
+        run: docker compose run --rm --build storage-tests
       - name: Check application runs as non-root
         run: >-
           docker run --rm --entrypoint python gazette-mdja-app:local -c
           "import os; assert os.getuid() != 0; from gazette.collectors.rss import load_sources;
-          from pathlib import Path; assert len(load_sources(Path('sources.csv'))) == 1"
+          from pathlib import Path; assert len(load_sources(Path('sources.csv'))) == 8"
       - name: Save the verified image
         run: docker save gazette-mdja-app:local -o /tmp/gazette-image.tar
       - uses: actions/upload-artifact@v4

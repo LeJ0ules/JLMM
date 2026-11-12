@@ -55,6 +55,10 @@ Le projet ne doit pas seulement fonctionner sur le poste d'un membre du groupe :
 
 **Hypothèse critique :** l'équipe disposera d'une machine Linux accessible et suffisamment disponible avant 7 h. Si elle est éteinte ou inaccessible, ni Docker Compose ni Airflow ne garantissent une publication ponctuelle. L'hébergement reste **à confirmer**.
 
+### Conditions d'usage des éditeurs
+
+Six des huit sources (Ouest-France, Sud Ouest, La Provence, Libération, Le Monde, FranceInfo) limitent leurs flux RSS à un usage personnel, privé ou non professionnel ; L'Humanité autorise les flux et les courts extraits avec lien. Le projet est pédagogique, non commercial et ne diffuse pas publiquement les données. Nous ne conservons que titre, extrait court, lien, date et rubrique, jamais le texte intégral. Le scraping est exclu : la colonne `acces` de `sources.csv` indique « Flux RSS (pas de scraping) ». Toute mise en production publique supposera une autorisation des éditeurs (point 5 des décisions à confirmer).
+
 ## 4. Choix techniques et alternatives
 
 ### 4.1. Récupération de la presse
@@ -81,7 +85,8 @@ Le projet ne doit pas seulement fonctionner sur le poste d'un membre du groupe :
 | **GitHub Actions planifié — écarté** | Exécution distante et logs intégrés | Horaire de démarrage non garanti |
 
 **Fonctionnement actuel :** `gazette_daily` lance la collecte à 6 h Europe/Paris,
-avec trois retries par source, un seul run actif et sans rattrapage automatique.
+avec trois retries immédiats puis huit retries espacés de 30 minutes par tâche,
+un seul run actif et sans rattrapage automatique.
 Airflow pilote les tâches ; Compose déploie les services. PostgreSQL conserve pour
 l'instant les métadonnées Airflow et les articles sont archivés en JSON.
 L'exécuteur local évite Redis et les workers Celery pour ce premier palier.
