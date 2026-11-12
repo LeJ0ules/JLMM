@@ -11,7 +11,7 @@ from airflow.sdk import dag, task
 
 @dag(
     dag_id="gazette_daily",
-    description="RSS -> stockage brut -> articles propres/rejets -> rapport -> contrôles et alertes",
+    description="RSS -> stockage brut -> articles propres/rejets -> rapport -> contrôles et alertes",  # noqa: E501
     schedule="*/30 * * * *",
     start_date=pendulum.datetime(2026, 10, 21, tz="Europe/Paris"),
     catchup=False,
@@ -51,9 +51,7 @@ def gazette_daily():
         from gazette.processing.persist import rebuild_quality
 
         root = Path(os.environ.get("GAZETTE_ROOT", "/opt/airflow"))
-        result = rebuild_quality(
-            os.environ["GAZETTE_DATABASE_URL"], root / "articles_bruts"
-        )
+        result = rebuild_quality(os.environ["GAZETTE_DATABASE_URL"], root / "articles_bruts")
         print(json.dumps({"event": "gazette_quality_processed", **result}, ensure_ascii=False))
         return result
 
@@ -62,18 +60,26 @@ def gazette_daily():
         from contextlib import closing
 
         import psycopg2
+
         from gazette.processing.report import collect_quality_snapshot, write_report
 
         root = Path(os.environ.get("GAZETTE_ROOT", "/opt/airflow"))
-        with closing(psycopg2.connect(os.environ["GAZETTE_DATABASE_URL"], connect_timeout=10)) as connection:
+        with closing(
+            psycopg2.connect(os.environ["GAZETTE_DATABASE_URL"], connect_timeout=10)
+        ) as connection:
             snapshot = collect_quality_snapshot(connection)
         report_path = write_report(snapshot, root / "rapports")
-        print(json.dumps({
-            "event": "gazette_quality_report",
-            "path": str(report_path),
-            "totals": snapshot["totaux"],
-            "top_5_rejets": snapshot["top_5_rejets"],
-        }, ensure_ascii=False))
+        print(
+            json.dumps(
+                {
+                    "event": "gazette_quality_report",
+                    "path": str(report_path),
+                    "totals": snapshot["totaux"],
+                    "top_5_rejets": snapshot["top_5_rejets"],
+                },
+                ensure_ascii=False,
+            )
+        )
         return str(report_path)
 
     @task(execution_timeout=timedelta(minutes=2))
